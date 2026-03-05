@@ -1,0 +1,14 @@
+auto_resume_ranker/
+│
+├── app.py
+├── requirements.txt
+├── .gitignore
+├── README.md
+│
+├── templates/
+│   └── index.html
+│
+├── static/
+│   └── style.css
+│
+└── uploads/
