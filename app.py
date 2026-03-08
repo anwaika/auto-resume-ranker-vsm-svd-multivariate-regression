@@ -4,15 +4,16 @@ import PyPDF2
 import docx
 import nltk
 import re
-
-from sentence_transformers import SentenceTransformer
-from sklearn.linear_model import Ridge
 import numpy as np
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.linear_model import Ridge
+from sentence_transformers import SentenceTransformer
 
-nltk.download('punkt')
+# Download tokenizer once
+nltk.download('punkt', quiet=True)
 
 app = Flask(__name__)
 
@@ -20,25 +21,30 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ---------------------------
-# SKILL DATABASE (Weighted)
+# LOAD AI MODEL
+# ---------------------------
+
+print("Loading semantic AI model...")
+ai_model = SentenceTransformer('all-MiniLM-L6-v2')
+print("Model loaded.")
+
+# ---------------------------
+# SKILL DATABASE
 # ---------------------------
 
 SKILLS = {
-    "python":5,
-    "sql":5,
-    "statistics":4,
-    "machine learning":5,
-    "data analysis":4,
-    "tableau":3,
-    "power bi":3,
-    "excel":3,
-    "pandas":4,
-    "numpy":4,
-    "deep learning":5,
-    "tensorflow":4,
-    "pytorch":4
+    "python":5,"sql":5,"statistics":4,"machine learning":5,
+    "data analysis":4,"data visualization":3,"data cleaning":3,
+    "tableau":3,"power bi":3,"excel":3,
+    "pandas":4,"numpy":4,"matplotlib":3,"seaborn":3,"scikit-learn":4,
+    "deep learning":5,"tensorflow":4,"pytorch":4,"nlp":4,
+    "postgresql":4,"mysql":3,"mongodb":3,
+    "aws":3,"azure":3,"gcp":3,
+    "spark":4,"hadoop":3,"git":2,"docker":3,
+    "a/b testing":4,"hypothesis testing":4,"time series":4
 }
 
+SKILL_MAX = sum(SKILLS.values())
 
 # ---------------------------
 # TEXT EXTRACTION
@@ -60,70 +66,149 @@ def extract_text(file_path):
         return "\n".join([para.text for para in doc.paragraphs])
 
     elif file_path.endswith(".txt"):
-        with open(file_path, "r", encoding="utf8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
 
     return ""
 
-
 # ---------------------------
-# PREPROCESSING
+# TEXT PREPROCESSING
 # ---------------------------
 
 def preprocess(text):
 
     text = text.lower()
-    text = re.sub(r'[^a-zA-Z ]', ' ', text)
+    text = re.sub(r'[^a-zA-Z0-9 ]', ' ', text)
+
     tokens = nltk.word_tokenize(text)
 
     return " ".join(tokens)
 
-
 # ---------------------------
-# SKILL SCORING
+# SKILL SCORE
 # ---------------------------
 
-def skill_score(resume_text):
+def skill_score(text):
 
     score = 0
 
     for skill, weight in SKILLS.items():
-        if skill in resume_text:
+        if skill in text:
             score += weight
 
-    return score
+    return score / SKILL_MAX
+
+
+# ---------------------------
+# EXPERIENCE EXTRACTION
+# ---------------------------
+
+def extract_experience_years(text):
+
+    matches = re.findall(r'(\d+)\+?\s*years?', text.lower())
+
+    if matches:
+        return min(int(max(matches)), 15)
+
+    return 0
 
 
 # ---------------------------
 # RANKING FUNCTION
 # ---------------------------
 
-def rank_resumes(job_desc, resumes):
+def rank_resumes(job_desc_raw, job_desc_processed, resumes_processed, resumes_raw):
 
-    documents = [job_desc] + resumes
+    documents = [job_desc_processed] + resumes_processed
 
-    tfidf = TfidfVectorizer(stop_words="english")
+    # ---------------- TF-IDF ----------------
+
+    tfidf = TfidfVectorizer(stop_words="english", ngram_range=(1,2))
 
     tfidf_matrix = tfidf.fit_transform(documents)
 
-    # ---- SVD (Math syllabus) ----
-    svd = TruncatedSVD(n_components=100)
+    # ---------------- SVD ----------------
 
-    reduced_matrix = svd.fit_transform(tfidf_matrix)
+    max_components = min(100, tfidf_matrix.shape[0]-1, tfidf_matrix.shape[1]-1)
 
-    job_vector = reduced_matrix[0].reshape(1, -1)
-    resume_vectors = reduced_matrix[1:]
+    if max_components >= 2:
 
-    similarity_scores = cosine_similarity(job_vector, resume_vectors)[0]
+        svd = TruncatedSVD(n_components=max_components)
 
-    return similarity_scores
+        reduced_matrix = svd.fit_transform(tfidf_matrix)
+
+        job_vector = reduced_matrix[0].reshape(1,-1)
+        resume_vectors = reduced_matrix[1:]
+
+        tfidf_scores = cosine_similarity(job_vector, resume_vectors)[0]
+
+    else:
+
+        job_vector = tfidf_matrix[0]
+        resume_vectors = tfidf_matrix[1:]
+
+        tfidf_scores = cosine_similarity(job_vector, resume_vectors)[0]
+
+    # ---------------- SEMANTIC AI ----------------
+
+    job_embedding = ai_model.encode([job_desc_raw])[0]
+    resume_embeddings = ai_model.encode(resumes_raw)
+
+    semantic_scores = cosine_similarity(
+        [job_embedding],
+        resume_embeddings
+    )[0]
+
+    # ---------------- SKILL SCORES ----------------
+
+    skill_scores = np.array([
+        skill_score(r) for r in resumes_processed
+    ])
+
+    # ---------------- EXPERIENCE ----------------
+
+    experience_scores = np.array([
+        extract_experience_years(r)/15 for r in resumes_raw
+    ])
+
+    # ---------------- FEATURE MATRIX ----------------
+
+    X = np.column_stack([
+        tfidf_scores,
+        semantic_scores,
+        skill_scores,
+        experience_scores
+    ])
+
+    # ---------------- RIDGE REGRESSION ----------------
+
+    ridge = Ridge(alpha=1.0)
+
+    ridge.fit(X, semantic_scores)
+
+    final_scores = ridge.predict(X)
+
+    # ---------------- SCORE BREAKDOWN ----------------
+
+    breakdown = []
+
+    for i in range(len(resumes_raw)):
+
+        breakdown.append({
+            "tfidf_svd": round(float(tfidf_scores[i])*100,1),
+            "semantic": round(float(semantic_scores[i])*100,1),
+            "skill": round(float(skill_scores[i])*100,1),
+            "experience": int(experience_scores[i]*15)
+        })
+
+    return final_scores, breakdown
 
 
 # ---------------------------
 # MAIN ROUTE
 # ---------------------------
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET","POST"])
 
 def index():
 
@@ -131,44 +216,58 @@ def index():
 
     if request.method == "POST":
 
-        job_desc = request.form.get("job_description","")
-        job_desc = preprocess(job_desc)
+        job_desc_raw = request.form.get("job_description","")
+
+        job_desc_processed = preprocess(job_desc_raw)
 
         files = request.files.getlist("resumes")
 
-        resumes = []
+        resumes_processed = []
+        resumes_raw = []
         names = []
-        skill_scores = []
 
         for file in files:
 
+            if file.filename == "":
+                continue
+
             path = os.path.join(UPLOAD_FOLDER, file.filename)
+
             file.save(path)
 
-            text = extract_text(path)
-            text = preprocess(text)
+            raw_text = extract_text(path)
 
-            resumes.append(text)
+            processed_text = preprocess(raw_text)
+
+            resumes_raw.append(raw_text)
+            resumes_processed.append(processed_text)
             names.append(file.filename)
 
-            skill_scores.append(skill_score(text))
+        if len(resumes_raw) > 0:
 
-        similarity_scores = rank_resumes(job_desc, resumes)
+            final_scores, breakdown = rank_resumes(
+                job_desc_raw,
+                job_desc_processed,
+                resumes_processed,
+                resumes_raw
+            )
 
-        # ----- FINAL SCORE -----
+            combined = list(zip(names, final_scores, breakdown))
 
-        final_scores = []
+            combined.sort(key=lambda x: x[1], reverse=True)
 
-        for i in range(len(names)):
-
-            skill_component = skill_scores[i] / 50   # normalize
-            similarity_component = similarity_scores[i]
-
-            final_score = (0.7 * similarity_component) + (0.3 * skill_component)
-
-            final_scores.append(final_score)
-
-        results = sorted(zip(names, final_scores), key=lambda x: x[1], reverse=True)
+            results = [
+                {
+                    "rank":i+1,
+                    "name":item[0],
+                    "final_score":round(float(item[1])*100,2),
+                    "tfidf_svd":item[2]["tfidf_svd"],
+                    "semantic":item[2]["semantic"],
+                    "skill":item[2]["skill"],
+                    "experience":item[2]["experience"]
+                }
+                for i,item in enumerate(combined)
+            ]
 
     return render_template("index.html", results=results)
 

@@ -1,15 +1,13 @@
-Auto-Resume-Ranker/
+Auto-Resume-Ranker-VSM-SVD-Multivariate-Regression
 │
 ├── app.py
 ├── requirements.txt
 ├── README.md
-├── .gitignore
-├── LICENSE
 │
-├── uploads/
+├── uploads
 │
-├── templates/
+├── templates
 │   └── index.html
 │
-└── static/
+└── static
     └── style.css
