@@ -1,38 +1,157 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AI Resume Ranker</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Ranker — AI Powered</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
 <body>
+<div class="wrapper">
 
-<h1>Resume Ranker</h1>
+    <!-- HEADER -->
+    <header>
+        <div class="header-eyebrow">AI · NLP · ML</div>
+        <h1>Resume <span>Ranker</span></h1>
+        <p class="subtitle">Vector Space Models · SVD · Cosine Similarity · Multivariate Regression</p>
+    </header>
 
-<form method="POST" enctype="multipart/form-data">
+    <!-- FORM CARD -->
+    <div class="card form-card">
+        <form method="POST" enctype="multipart/form-data" id="rankForm">
 
-<label>Enter Job Description:</label><br>
-<textarea name="job_desc" rows="6" cols="60" required></textarea><br><br>
+            <div class="field-group">
+                <label class="field-label">Job Description</label>
+                <textarea name="job_description" rows="7"
+                    placeholder="Paste the full job description here — skills, requirements, responsibilities..."
+                    required></textarea>
+            </div>
 
-<label>Upload Resumes:</label><br>
-<input type="file" name="resumes" multiple required><br><br>
+            <div class="field-group">
+                <label class="field-label">Upload Resumes</label>
+                <div class="file-drop" id="fileDrop">
+                    <input type="file" name="resumes" multiple accept=".pdf,.docx,.txt" required id="fileInput">
+                    <div class="file-drop-content">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <span class="drop-text">Drop files here or <u>browse</u></span>
+                        <span class="drop-sub">PDF · DOCX · TXT — multiple files supported</span>
+                    </div>
+                    <div class="file-list" id="fileList"></div>
+                </div>
+            </div>
 
-<button type="submit">Rank Resumes</button>
+            <button type="submit" id="submitBtn">
+                <span class="btn-text">Rank Resumes</span>
+                <span class="btn-icon">→</span>
+                <div class="btn-loader" id="btnLoader"></div>
+            </button>
 
-</form>
+        </form>
+    </div>
 
-<hr>
+    <!-- RESULTS -->
+    {% if results and results|length > 0 %}
+    <div class="results-section">
 
-{% if rankings %}
-<h2>Results</h2>
+        <div class="results-header">
+            <h2>Ranking Results</h2>
+            <span class="results-count">{{ results|length }} candidate{{ 's' if results|length != 1 else '' }}</span>
+        </div>
 
-<ol>
-{% for name, score in rankings %}
-<li>{{ name }} - {{ (score * 100) | round(2) }}%</li>
-{% endfor %}
-</ol>
+        <div class="method-tags">
+            <span class="tag">TF-IDF / VSM</span>
+            <span class="tag">SVD</span>
+            <span class="tag">Cosine Similarity</span>
+            <span class="tag">Ridge Regression</span>
+            <span class="tag">Sentence Transformers</span>
+        </div>
 
-{% endif %}
+        <div class="ranking-list">
+        {% for r in results %}
+        <div class="rank-card {% if r.rank == 1 %}rank-first{% elif r.rank == 2 %}rank-second{% elif r.rank == 3 %}rank-third{% endif %}">
+
+            <div class="rank-top">
+                <div class="rank-left">
+                    <div class="rank-num">#{{ r.rank }}</div>
+                    <div class="rank-info">
+                        <div class="rank-name">{{ r.name }}</div>
+                        <div class="rank-exp">{{ r.experience }} yr{{ 's' if r.experience != 1 else '' }} experience</div>
+                    </div>
+                </div>
+                <div class="final-score">
+                    <span class="score-val">{{ r.final_score }}</span><span class="score-pct">%</span>
+                </div>
+            </div>
+
+            <div class="score-bar-wrap">
+                <div class="score-bar" style="width: {{ r.final_score if r.final_score > 0 else 0 }}%"></div>
+            </div>
+
+            <div class="breakdown">
+                <div class="breakdown-item">
+                    <span class="bd-label">TF-IDF / SVD</span>
+                    <div class="bd-bar-track"><div class="bd-bar" style="width:{{ r.tfidf_svd }}%"></div></div>
+                    <span class="bd-val">{{ r.tfidf_svd }}%</span>
+                </div>
+                <div class="breakdown-item">
+                    <span class="bd-label">Semantic AI</span>
+                    <div class="bd-bar-track"><div class="bd-bar semantic" style="width:{{ r.semantic }}%"></div></div>
+                    <span class="bd-val">{{ r.semantic }}%</span>
+                </div>
+                <div class="breakdown-item">
+                    <span class="bd-label">Skill Match</span>
+                    <div class="bd-bar-track"><div class="bd-bar skill" style="width:{{ r.skill }}%"></div></div>
+                    <span class="bd-val">{{ r.skill }}%</span>
+                </div>
+            </div>
+
+        </div>
+        {% endfor %}
+        </div>
+
+    </div>
+    {% endif %}
+
+    <footer>
+        <p>Vector Space Models · Singular Value Decomposition · Cosine Similarity · Multivariate Regression</p>
+    </footer>
+
+</div>
+
+<script>
+    const fileInput = document.getElementById("fileInput");
+    const fileList = document.getElementById("fileList");
+
+    if (fileInput) {
+        fileInput.addEventListener("change", function () {
+            const files = Array.from(fileInput.files);
+            if (files.length === 0) { fileList.innerHTML = ""; return; }
+            fileList.innerHTML = files.map(file => `
+                <div class="file-chip">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    ${file.name}
+                </div>`).join("");
+        });
+    }
+
+    const form = document.getElementById("rankForm");
+    if (form) {
+        form.addEventListener("submit", () => {
+            const btn = document.getElementById("submitBtn");
+            if (btn) btn.classList.add("loading");
+        });
+    }
+</script>
 
 </body>
 </html>

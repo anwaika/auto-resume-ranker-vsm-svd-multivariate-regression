@@ -12,8 +12,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.linear_model import Ridge
 from sentence_transformers import SentenceTransformer
 
-# Download tokenizer once
+# Download tokenizer
 nltk.download('punkt', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 
 app = Flask(__name__)
 
@@ -52,24 +53,38 @@ SKILL_MAX = sum(SKILLS.values())
 
 def extract_text(file_path):
 
+    file_path = file_path.lower()
+
     if file_path.endswith(".pdf"):
+
         text = ""
-        with open(file_path, "rb") as file:
-            reader = PyPDF2.PdfReader(file)
-            for page in reader.pages:
-                if page.extract_text():
-                    text += page.extract_text()
+
+        try:
+            with open(file_path, "rb") as file:
+                reader = PyPDF2.PdfReader(file)
+
+                for page in reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text
+        except:
+            pass
+
         return text
 
     elif file_path.endswith(".docx"):
+
         doc = docx.Document(file_path)
+
         return "\n".join([para.text for para in doc.paragraphs])
 
     elif file_path.endswith(".txt"):
+
         with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
 
     return ""
+
 
 # ---------------------------
 # TEXT PREPROCESSING
@@ -78,11 +93,13 @@ def extract_text(file_path):
 def preprocess(text):
 
     text = text.lower()
+
     text = re.sub(r'[^a-zA-Z0-9 ]', ' ', text)
 
     tokens = nltk.word_tokenize(text)
 
     return " ".join(tokens)
+
 
 # ---------------------------
 # SKILL SCORE
@@ -93,6 +110,7 @@ def skill_score(text):
     score = 0
 
     for skill, weight in SKILLS.items():
+
         if skill in text:
             score += weight
 
@@ -120,8 +138,6 @@ def extract_experience_years(text):
 def rank_resumes(job_desc_raw, job_desc_processed, resumes_processed, resumes_raw):
 
     documents = [job_desc_processed] + resumes_processed
-
-    # ---------------- TF-IDF ----------------
 
     tfidf = TfidfVectorizer(stop_words="english", ngram_range=(1,2))
 
@@ -218,6 +234,9 @@ def index():
 
         job_desc_raw = request.form.get("job_description","")
 
+        if not job_desc_raw:
+            return render_template("index.html", results=[])
+
         job_desc_processed = preprocess(job_desc_raw)
 
         files = request.files.getlist("resumes")
@@ -236,6 +255,9 @@ def index():
             file.save(path)
 
             raw_text = extract_text(path)
+
+            if not raw_text:
+                continue
 
             processed_text = preprocess(raw_text)
 
@@ -273,4 +295,4 @@ def index():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)
